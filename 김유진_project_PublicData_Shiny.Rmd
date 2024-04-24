@@ -1,0 +1,117 @@
+---
+title: "공공데이터_식중독"
+author: "yujin kim"
+runtime: shiny
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    df_print: paged
+---
+
+```{r  setup, include=T, echo=FALSE, warning=F, message=F}
+knitr::opts_chunk$set(echo = FALSE)
+options(scipen = 999)
+library(readxl)
+library(dplyr) 
+library(shiny)
+library(tidyr)
+library(ggplot2)
+library(xfun) 
+library(htmltools)
+library(tidyverse)
+library(ggrepel)
+library(sp)
+library(rgdal)
+```
+# 여름철 식중독 : 우리는 안심하고 외식을 할 수 있는가?
+
+## 1. 최근 5년간 여름철 식중독 발생과 원인
+
+```{r message=FALSE, warning=FALSE}
+## 월별 식중독
+food <- read.csv("월별_연도별_식중독_통계_.csv", fileEncoding = "euc-kr")
+food$월 = as.factor(as.integer(food$월))
+
+## 식중독 원인
+fmy <- read.csv("시설 월 연도.csv", fileEncoding = "euc-kr")
+
+## 월별 식중독 시각화
+food %>%
+group_by(구분) %>%
+mutate(총합 = X2017년+X2018년+X2019년+X2020년+X2021년)%>%
+ggplot(aes(월,총합))+
+labs(title = '2017~2021년 월별 식중독') +
+geom_bar(stat = "identity",  fill = ifelse(food$월 %in% c("6", "7", "8", "9"), "skyblue", "darkgray"))
+```
+
+- 여름철 식중독 감염자 수가 증가하는지 파악해 보기 위해 최근 5년간 식중독 감염자 수를 시각화해본 결과, 실제로 6,7,8,9월 달의 식중독 감염자 수가 증가한 것으로 파악 가능했습니다.
+
+```{r}
+##원인시설/연도별 식중독 시각화
+
+fmy %>%  
+  group_by(원인시설) %>%
+  arrange(desc(연도))%>%
+  ggplot(aes(연도,건수, fill=원인시설,col=원인시설))+
+  labs(title = '2017~2021년 원인시설~연도별 식중독') +
+  geom_bar(stat = "identity")
+
+
+```
+
+- 식품안전나라 포털 통계에 따르면, 2017년도에는 총 발생건수인 274건 중 음식점이 222건으로 상당히 높은 부분을 차지하고 있었습니다. 이후의 데이터도 확인해 본 결과, 2018년도에는 287건 중 202건, 2019년도에는 231건 중 175건, 2020년도에는 149건 중 108건, 2021년도에는 198건 중 119건으로 음식점에서 식중독이 가장 많이 발생한 것으로 파악 가능했습니다.  
+
+## 2. 외식 매출액
+
+```{r message=FALSE, warning=FALSE}
+## 산업별 매출액
+osso <- read.csv('외식산업.csv')
+
+osso %>% filter(항목 == "매출액") -> 매출
+매출$num <- format(매출$수,big.mark=",")
+ggplot(매출, aes(x = 연도))+geom_bar(aes(y = 수,fill = 산업별),stat = 'identity',position = position_dodge(0.5),width=0.4)+ggtitle("산업별 매출액수")+geom_text(aes(y = 수,label = num),vjust=-0.5 )
+```
+
+- 식품산업통계정보에 따른 2017년부터 2021년까지의 5년간 산업별 매출 액수입니다. 2020년에 매출액이 조금 주는듯싶었으나 보시다시피 107조, 114조, 120조, 117조, 127조로 점차 오르는 모습을 확인할 수 있습니다. 
+
+```{r}
+##배달 
+delivery <- read.csv("delivery2.csv", fileEncoding = "euc-kr")
+
+delivery %>%
+  group_by(앱.대행) %>% 
+    ggplot(aes(연도, 이용여부, col=앱.대행))+
+    labs(title = '배달앱,배달대행 이용여부(%)') +
+    geom_point()+
+    geom_line()
+```
+
+- 하지만 음식점의 매출이 오르는 것이 소비자들의 음식점 이용 원인뿐만 아니라, 물가 상승 등의 다른 원인들 또한 있을 것이라 생각되어 음식점 매출액 상승의 원인이 소비자들의 이용 증가로 확정 짓기에는 문제가 있다 생각하였습니다. 그래서 배달 앱, 배달 대행 이용 여부 데이터 시각화를 통해 음식점 매출과 음식점 이용이 관련 있는지 알아보았습니다.
+
+```{r}
+delivery %>% group_by(연도) %>% summarise(n = sum(이용여부))-> delivery
+osso %>% filter(산업별 == "음식점 및 주점업"&항목 == '매출액') %>% select(연도, 수)%>% group_by(연도) -> sales
+
+renderPrint(print(cor(sales$수, delivery$n)))
+```
+
+음식점 매출액 증가의 이유가 배달사용율과 관련이 있었습니다.
+
+## 3. 지도 
+### 모범음식점과 위생등급
+> 모범음식점이란?  
+모범음식점은 1989연도부터 도입된 제도로 모범업소의 지정관리 및 지원 등에 관한 세부적인 사항을 정해 관리의 효율성을 가하고 위생적 개선과 서비스 수준 향상을 위해 생성된 제도입니다. 주요관광지, 숙박업소, 다중 이용시설 주변 장소를 대상으로 선정하고 있습니다.
+
+> 위생등급이란?  
+식품의약품안전처에서는 2017년부터 전국 음식점의 위생수준을 평가하여 등급을 부여하는 음식점 위생등급제를 시행하고 있습니다. 소비자의 선택권 보장과 식중독예방을 위해 시행하고 있는 것입니다. 위생등급에 따라 매우우수, 우수, 좋음 3단계로 등급이 부여되고 있습니다.
+
+### 모범음식점과 위생등급식당 시각화
+
+춘천 지역 모범 음식점과 위생등급 선정 음식점 지도시각화입니다. 
+
+```{r}
+HTML('<iframe src="https://chart-studio.plotly.com/~greenmaesil/10.embed" width="100%"  height="500px"></iframe>')
+```
+
+https://plotly.com/~greenmaesil/10/
+
